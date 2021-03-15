@@ -68,7 +68,9 @@ if (process.env.NODE_ENV === 'production') {
       filename: path.resolve(__dirname, 'dist/index.html')
     }),
     new PrerenderSPAPlugin({
+      // 指定需要预渲染的文件路径
       staticDir: path.join(__dirname, 'dist'),
+      // 指定需要预渲染的页面路由，为何关闭historyApiFallback也会渲染呢？
       routes: [ '/', '/about', '/contact' ],
 
       renderer: new Renderer({
