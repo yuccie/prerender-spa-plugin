@@ -5,10 +5,117 @@
 - 而 @prerenderer/prerenderer 和 @prerenderer/renderer-puppeteer 这两个其实都在[这个仓库](https://github.com/JoshTheDerf/prerenderer)
 - @prerenderer/prerenderer其实就是获取的根目录的index.js，而 @prerenderer/renderer-puppeteer获取的是rendeners目录里的
 
-## prerender-spa-plugin
+## 
 
 ```js
-// prerender-spa-plugin 源码之package.json
+// 过程一：webapck入口配置
+
+// webpack.config.js的配置
+var path = require('path')
+var webpack = require('webpack')
+var HtmlWebpackPlugin = require('html-webpack-plugin')
+
+const PrerenderSPAPlugin = require('prerender-spa-plugin')
+const Renderer = PrerenderSPAPlugin.PuppeteerRenderer // Puppeteer访问页面使用
+
+const VueLoaderPlugin = require('vue-loader/lib/plugin')
+
+module.exports = {
+  mode: process.env.NODE_ENV,
+  entry: './src/main.js',
+  output: {
+    path: path.resolve(__dirname, './dist'),
+    publicPath: '/',
+    filename: 'build.js'
+  },
+  module: {
+    rules: [
+      {
+        test: /\.vue$/,
+        loader: 'vue-loader'
+      },
+      {
+        test: /\.js$/,
+        loader: 'babel-loader',
+        exclude: /node_modules/
+      },
+      {
+        test: /\.(png|jpg|gif|svg)$/,
+        loader: 'file-loader',
+        options: {
+          name: '[name].[ext]?[hash]'
+        }
+      },
+      {
+        test: /\.css$/,
+        use: [
+          'vue-style-loader',
+          'css-loader'
+        ]
+      }
+    ]
+  },
+  resolve: {
+    alias: {
+      'vue$': 'vue/dist/vue.esm.js'
+    }
+  },
+  devServer: {
+    historyApiFallback: true,
+    noInfo: false,
+  },
+  devtool: '#eval-source-map',
+  plugins: [
+    new VueLoaderPlugin(),
+  ]
+}
+if (process.env.NODE_ENV === 'production') {
+  module.exports.devtool = '#source-map'
+  module.exports.plugins = (module.exports.plugins || []).concat([
+    new webpack.DefinePlugin({
+      'process.env': {
+        NODE_ENV: '"production"'
+      }
+    }),
+    new HtmlWebpackPlugin({
+      title: 'PRODUCTION prerender-spa-plugin',
+      template: 'index.html',
+      filename: path.resolve(__dirname, 'dist/index.html')
+    }),
+    new PrerenderSPAPlugin({
+      // 指定需要预渲染的文件路径
+      staticDir: path.join(__dirname, 'dist'),
+      // 指定需要预渲染的页面路由，为何关闭historyApiFallback也会渲染呢？
+      // 这里的路由主要是express服务访问的地址，同时也是puppeteer渲染的路由
+      routes: [ '/', '/about', '/contact' ],
+    
+      // puppeteer使用的配置
+      renderer: new Renderer({
+        inject: {
+          foo: 'bar'
+        },
+        headless: true,
+        renderAfterDocumentEvent: 'render-event'
+      })
+    })
+  ])
+} else {
+  // NODE_ENV === 'development'
+  module.exports.plugins = (module.exports.plugins || []).concat([
+    new webpack.DefinePlugin({
+      'process.env': {
+        NODE_ENV: '"development"'
+      }
+    }),
+    new HtmlWebpackPlugin({
+      title: 'DEVELOPMENT prerender-spa-plugin',
+      template: 'index.html',
+      filename: 'index.html'
+    }),
+  ])
+}
+
+// 过程二：定位到prerender-spa-plugin 源码之package.json
 {
   "name": "prerender-spa-plugin",
   "version": "3.4.0",
@@ -19,7 +126,7 @@
 }
 
 
-// prerender-spa-plugin 源码之index.js
+// 过程三：定位到prerender-spa-plugin 源码之index.js
 
 /**
  * @file Just a super-simple wrapper for determining whether to load the original ES6 version
@@ -38,19 +145,613 @@ if (parseInt(process.versions.node.split('.')[0]) >= 8) {
 }
 
 
-// ./es6/index.js
-// 其实很简单，引入
+// 过程四：定位到prerender-spa-plugin 源码之 ./es6/index.js
+// 这里需要用到@prerenderer/prerenderer，@prerenderer/renderer-puppeteer
 const path = require('path')
 const Prerenderer = require('@prerenderer/prerenderer')
 const PuppeteerRenderer = require('@prerenderer/renderer-puppeteer')
 const { minify } = require('html-minifier')
 
-function PrerenderSPAPlugin(...args) {}
+// ...args自动合并为数组
+function PrerenderSPAPlugin (...args) {
+  const rendererOptions = {} // Primarily for backwards-compatibility.
 
-PrerenderSPAPlugin.prototype.apply = function (compiler) {}
+  this._options = {}
+
+  // console.log('从webpack 过来的args:', args);
+  // [
+  //   {
+  //     staticDir: '/Users/dujichong/workDir/source-code/prerender-spa-plugin/examples/vue2-webpack-simple/dist',
+  //     routes: [ '/', '/about', '/contact' ],
+  //     renderer: PuppeteerRenderer { _puppeteer: null, _rendererOptions: [Object] }
+  //   }
+  // ]
+
+  // Normal args object.
+  // v2的应该不会只传一个值
+  if (args.length === 1) {
+    this._options = args[0] || {}
+
+  // Backwards-compatibility with v2
+  } else {
+    console.warn("[prerender-spa-plugin] You appear to be using the v2 argument-based configuration options. It's recommended that you migrate to the clearer object-based configuration system.\nCheck the documentation for more information.")
+    let staticDir, routes
+
+    args.forEach(arg => {
+      if (typeof arg === 'string') staticDir = arg
+      else if (Array.isArray(arg)) routes = arg
+      else if (typeof arg === 'object') this._options = arg
+    })
+
+    staticDir ? this._options.staticDir = staticDir : null
+    routes ? this._options.routes = routes : null
+  }
+
+  // Backwards compatiblity with v2.
+  if (this._options.captureAfterDocumentEvent) {
+    console.warn('[prerender-spa-plugin] captureAfterDocumentEvent has been renamed to renderAfterDocumentEvent and should be moved to the renderer options.')
+    rendererOptions.renderAfterDocumentEvent = this._options.captureAfterDocumentEvent
+  }
+
+  if (this._options.captureAfterDocumentEvent) {
+    console.warn('[prerender-spa-plugin] captureAfterElementExists has been renamed to renderAfterElementExists and should be moved to the renderer options.')
+    rendererOptions.renderAfterElementExists = this._options.captureAfterElementExists
+  }
+
+  if (this._options.captureAfterTime) {
+    console.warn('[prerender-spa-plugin] captureAfterTime has been renamed to renderAfterTime and should be moved to the renderer options.')
+    rendererOptions.renderAfterTime = this._options.captureAfterTime
+  }
+
+  // 没有server则会在这里附一个空值
+  this._options.server = this._options.server || {}
+  // 没有render则会在这里赋值一个PuppeteerRenderer实例
+  this._options.renderer = this._options.renderer || new PuppeteerRenderer(Object.assign({}, { headless: true }, rendererOptions))
+
+  if (this._options.postProcessHtml) {
+    console.warn('[prerender-spa-plugin] postProcessHtml should be migrated to postProcess! Consult the documentation for more information.')
+  }
+
+  // console.log('兼容完V2后的rendererOptions', rendererOptions);
+  // {}
+  // console.log('this._options', this._options);
+  // {
+  //   staticDir: '/Users/dujichong/workDir/source-code/prerender-spa-plugin/examples/vue2-webpack-simple/dist',
+  //   routes: [ '/', '/about', '/contact' ],
+  //   renderer: PuppeteerRenderer {
+  //     _puppeteer: null,
+  //     _rendererOptions: {
+  //       inject: [Object],
+  //       headless: true,
+  //       renderAfterDocumentEvent: 'render-event',
+  //       maxConcurrentRoutes: 0,
+  //       injectProperty: '__PRERENDER_INJECTED'
+  //     }
+  //   },
+  //   server: {}
+  // }
+}
+
+
+
+PrerenderSPAPlugin.prototype.apply = function (compiler) {
+  const compilerFS = compiler.outputFileSystem
+
+  // From https://github.com/ahmadnassri/mkdirp-promise/blob/master/lib/index.js
+  const mkdirp = function (dir, opts) {
+    return new Promise((resolve, reject) => {
+      compilerFS.mkdirp(dir, opts, (err, made) => err === null ? resolve(made) : reject(err))
+    })
+  }
+
+  const afterEmit = (compilation, done) => {
+    // console.log('afterEmit 钩子里的 this._options， 此时和构造函数里一致', this._options);
+    // 并将配置传给：@prerenderer/prerenderer的构造函数
+    const PrerendererInstance = new Prerenderer(this._options)
+
+    // 调用@prerenderer/prerenderer的initialize方法：
+    PrerendererInstance.initialize()
+      .then(() => {
+        return PrerendererInstance.renderRoutes(this._options.routes || [])
+      })
+      // Backwards-compatibility with v2 (postprocessHTML should be migrated to postProcess)
+      .then(renderedRoutes => {
+        console.log(1);
+          return this._options.postProcessHtml
+          ? renderedRoutes.map(renderedRoute => {
+            const processed = this._options.postProcessHtml(renderedRoute)
+            if (typeof processed === 'string') renderedRoute.html = processed
+            else renderedRoute = processed
+
+            return renderedRoute
+          })
+          : renderedRoutes
+        }
+      )
+      // Run postProcess hooks.
+      .then(renderedRoutes => this._options.postProcess
+        ? Promise.all(renderedRoutes.map(renderedRoute => this._options.postProcess(renderedRoute)))
+        : renderedRoutes
+      )
+      // Check to ensure postProcess hooks returned the renderedRoute object properly.
+      .then(renderedRoutes => {
+        const isValid = renderedRoutes.every(r => typeof r === 'object')
+        if (!isValid) {
+          throw new Error('[prerender-spa-plugin] Rendered routes are empty, did you forget to return the `context` object in postProcess?')
+        }
+
+        return renderedRoutes
+      })
+      // Minify html files if specified in config.
+      .then(renderedRoutes => {
+        if (!this._options.minify) return renderedRoutes
+
+        renderedRoutes.forEach(route => {
+          route.html = minify(route.html, this._options.minify)
+        })
+
+        return renderedRoutes
+      })
+      // Calculate outputPath if it hasn't been set already.
+      .then(renderedRoutes => {
+        renderedRoutes.forEach(rendered => {
+          if (!rendered.outputPath) {
+            rendered.outputPath = path.join(this._options.outputDir || this._options.staticDir, rendered.route, 'index.html')
+          }
+        })
+
+        return renderedRoutes
+      })
+      // Create dirs and write prerendered files.
+      .then(processedRoutes => {
+        const promises = Promise.all(processedRoutes.map(processedRoute => {
+          return mkdirp(path.dirname(processedRoute.outputPath))
+            .then(() => {
+              return new Promise((resolve, reject) => {
+                compilerFS.writeFile(processedRoute.outputPath, processedRoute.html.trim(), err => {
+                  if (err) reject(`[prerender-spa-plugin] Unable to write rendered route to file "${processedRoute.outputPath}" \n ${err}.`)
+                  else resolve()
+                })
+              })
+            })
+            .catch(err => {
+              if (typeof err === 'string') {
+                err = `[prerender-spa-plugin] Unable to create directory ${path.dirname(processedRoute.outputPath)} for route ${processedRoute.route}. \n ${err}`
+              }
+
+              throw err
+            })
+        }))
+
+        return promises
+      })
+      .then(r => {
+        PrerendererInstance.destroy()
+        done()
+      })
+      .catch(err => {
+        PrerendererInstance.destroy()
+        const msg = '[prerender-spa-plugin] Unable to prerender all routes!'
+        console.error(msg)
+        compilation.errors.push(new Error(msg))
+        done()
+      })
+  }
+
+  if (compiler.hooks) {
+    const plugin = { name: 'PrerenderSPAPlugin' }
+    // 在webapck的afterEmit的钩子后添加prerenderSPAPlugin插件
+    // Called after emitting assets to output directory
+    compiler.hooks.afterEmit.tapAsync(plugin, afterEmit)
+  } else {
+    compiler.plugin('after-emit', afterEmit)
+  }
+}
 
 PrerenderSPAPlugin.PuppeteerRenderer = PuppeteerRenderer
 
 module.exports = PrerenderSPAPlugin
+
+
+// 过程五：定位到@prerenderer/prerenderer 之 index.js
+/**
+ * @file Just a super-simple wrapper for determining whether to load the original ES6 version
+ * of the code or the ES5 version at runtime.
+ * @author Joshua Bemenderfer <tribex10@gmail.com>
+ */
+
+// Is there a better way to check versions? Haven't really looked into it.
+if (+process.versions.node.split('.')[0] >= 8) {
+  // Native (Node 8+) ES6. (Requires async / await.)
+  module.exports = require('./es6/index.js')
+} else {
+  // Transpiled through babel to target Node 4+.
+  module.exports = require('./es5-autogenerated/index.js')
+}
+
+// 过程五-1：定位到@prerenderer/prerenderer 之 ./es6/index.js
+const Server = require('./server')
+const PortFinder = require('portfinder')
+
+const PACKAGE_NAME = '[Prerenderer]'
+
+const OPTION_SCHEMA = {
+  staticDir: {
+    type: String,
+    required: true
+  },
+  indexPath: {
+    type: String,
+    required: false
+  }
+}
+
+function validateOptionsSchema (schema, options, parent) {
+  var errors = []
+
+  Object.keys(schema).forEach(key => {
+    // Required options
+    if (schema[key].required && !options[key]) {
+      errors.push(`"${parent || ''}${key}" option is required!`)
+      return
+    // Options with default values or potential children.
+    } else if (!options[key] && (schema[key].default || schema[key].children)) {
+      options[key] = schema[key].default != null ? schema[key].default : {}
+      // Non-required empty options.
+    } else if (!options[key]) return
+
+    // Array-type options
+    if (Array.isArray(schema[key].type) && schema[key].type.indexOf(options[key].constructor) === -1) {
+      console.log(schema[key].type.indexOf(options[key].constructor))
+      errors.push(`"${parent || ''}${key}" option must be a ${schema[key].type.map(t => t.name).join(' or ')}!`)
+      // Single-type options.
+    } else if (!Array.isArray(schema[key].type) && options[key].constructor !== schema[key].type) {
+      errors.push(`"${parent || ''}${key}" option must be a ${schema[key].type.name}!`)
+      return
+    }
+
+    if (schema[key].children) {
+      errors.push(...validateOptionsSchema(schema[key].children, options[key], key))
+      return
+    }
+  })
+
+  errors.forEach(function (error) {
+    console.error(`${PACKAGE_NAME} ${error}`)
+  })
+
+  return errors
+}
+
+class Prerenderer {
+  constructor (options) {
+    this._options = options || {}
+
+    // 这里是注册的express服务
+    this._server = new Server(this)
+    // 这里是注册的puppeteer服务
+    this._renderer = options.renderer
+
+    // 这里还接受this._renderer.preServer
+    if (this._renderer && this._renderer.preServer) this._renderer.preServer(this)
+
+    if (!this._options) throw new Error(`${PACKAGE_NAME} Options must be defined!`)
+
+    if (!this._options.renderer) {
+      throw new Error(`${PACKAGE_NAME} No renderer was passed to prerenderer.
+If you are not sure wihch renderer to use, see the documentation at https://github.com/tribex/prerenderer.`)
+    }
+
+    if (!this._options.server) this._options.server = {}
+
+    // 遍历校验参数，不符合则添加到errors数组中
+    const optionValidationErrors = validateOptionsSchema(OPTION_SCHEMA, this._options)
+
+    if (optionValidationErrors.length !== 0) throw new Error(`${PACKAGE_NAME} Options are invalid. Unable to prerender!`)
+  }
+
+  async initialize () {
+    // Initialization is separate from construction because science? (Ideally to initialize the server and renderer separately.)
+    this._options.server.port = this._options.server.port || await PortFinder.getPortPromise() || 13010
+    // 因为this._options.server.port没有提供，所以await PortFinder.getPortPromise()提供的：8000
+    
+    // 因为构造函数执行在前，此时的this._server其实就是express提供的服务了
+    // 如果注释了这行，会报错：[prerender-spa-plugin] Unable to prerender all routes!
+    await this._server.initialize()
+    // 而这里就是puppeteer提供的服务了。
+    await this._renderer.initialize()
+
+    return Promise.resolve()
+  }
+
+  destroy () {
+    this._renderer.destroy()
+    // express服务若不关闭，则控制台会一直打开
+    this._server.destroy()
+  }
+
+  getServer () {
+    return this._server
+  }
+
+  getRenderer () {
+    return this._renderer
+  }
+
+  getOptions () {
+    return this._options
+  }
+
+  modifyServer (server, stage) {
+    if (this._renderer.modifyServer) this._renderer.modifyServer(this, server, stage)
+  }
+
+  renderRoutes (routes) {
+    // console.log('routes', routes);
+    // routes [ '/', '/about', '/contact' ]
+
+    // 这里是调用puppeteer的renderRoutes，使用puppeteer打开页面，然后promise.all结合promise-limit，打开对应的routes，并返回结果
+    // 这里就体现到了，puppeteer只是打开浏览器，访问页面，但页面的资源却是express服务提供的，其实就是前端和后端。
+    return this._renderer.renderRoutes(routes, this)
+    // Handle non-ASCII or invalid URL characters in routes by normalizing them back to unicode.
+    // Some browser environments may change unicode or special characters in routes to percent encodings.
+    // We need to convert them back for saving in the filesystem.
+    .then(renderedRoutes => {
+      // console.log('renderedRoutes', renderedRoutes);
+      // 此时的renderedRoutes是个数组，其实就是处理完的页面路径，类似：
+      // [
+      //   {
+      //     originalRoute: '/',
+      //     route: '/',
+      //     html: 'xxxx',
+      //   }
+      // ]
+      renderedRoutes.forEach(rendered => {
+        rendered.route = decodeURIComponent(rendered.route)
+      })
+
+      return renderedRoutes
+    })
+  }
+}
+
+module.exports = Prerenderer
+
+// 过程五-2：定位到@prerenderer/prerenderer 之 ./es6/server.js
+const express = require('express')
+const proxy = require('http-proxy-middleware')
+const path = require('path')
+
+class Server {
+  constructor (Prerenderer) {
+    // 这里的Prerenderer其实就是Prerenderer的一个实例
+    this._prerenderer = Prerenderer
+    this._options = Prerenderer.getOptions()
+    this._expressServer = express()
+    this._nativeServer = null
+  }
+
+  initialize () {
+    console.log('Server initialize', Date.now());
+    const server = this._expressServer
+
+    this._prerenderer.modifyServer(this, 'pre-static')
+
+    server.get('*.*', express.static(this._options.staticDir, {
+      dotfiles: 'allow'
+    }))
+
+    this._prerenderer.modifyServer(this, 'post-static')
+
+    this._prerenderer.modifyServer(this, 'pre-fallback')
+
+    if (this._options.server && this._options.server.proxy) {
+      for (let proxyPath of Object.keys(this._options.server.proxy)) {
+        server.use(proxyPath, proxy(this._options.server.proxy[proxyPath]))
+      }
+    }
+
+    server.get('*', (req, res) => {
+      // 这里会拦截到各个页面的请求
+      // console.log('req', req.originalUrl);
+      // req /contact
+      // req /about
+      // req /
+      res.sendFile(this._options.indexPath ? this._options.indexPath : path.join(this._options.staticDir, 'index.html'))
+    })
+
+    this._prerenderer.modifyServer(this, 'post-fallback')
+
+    return new Promise((resolve, reject) => {
+      this._nativeServer = server.listen(this._options.server.port, () => {
+        resolve()
+      })
+    })
+  }
+
+  destroy () {
+    this._nativeServer.close()
+  }
+}
+
+module.exports = Server
+
+
+// 过程六：定位到@prerenderer/renderer-puppeteer 之 index.js
+// 在node_modules/@prerenderer目录下
+/**
+ * @file Just a super-simple wrapper for determining whether to load the original ES6 version
+ * of the code or the ES5 version at runtime.
+ * @author Joshua Bemenderfer <tribex10@gmail.com>
+ */
+
+// Is there a better way to check versions? Haven't really looked into it.
+if (+process.versions.node.split('.')[0] >= 8) {
+  // Native (Node 8+) ES6. (Requires async / await.)
+  module.exports = require('./es6/renderer.js')
+} else {
+  // Transpiled through babel to target Node 4+.
+  module.exports = require('./es5-autogenerated/renderer.js')
+}
+
+// 过程六-1：定位到@prerenderer/renderer-puppeteer 之 ./es6/renderer.js
+const promiseLimit = require('promise-limit')
+const puppeteer = require('puppeteer')
+
+const waitForRender = function (options) {
+  options = options || {}
+
+  return new Promise((resolve, reject) => {
+    // Render when an event fires on the document.
+    if (options.renderAfterDocumentEvent) {
+      if (window['__PRERENDER_STATUS'] && window['__PRERENDER_STATUS'].__DOCUMENT_EVENT_RESOLVED) resolve()
+      document.addEventListener(options.renderAfterDocumentEvent, () => resolve())
+
+    // Render after a certain number of milliseconds.
+    } else if (options.renderAfterTime) {
+      setTimeout(() => resolve(), options.renderAfterTime)
+
+    // Default: Render immediately after page content loads.
+    } else {
+      resolve()
+    }
+  })
+}
+
+class PuppeteerRenderer {
+  constructor (rendererOptions) {
+    this._puppeteer = null
+    this._rendererOptions = rendererOptions || {}
+
+    if (this._rendererOptions.maxConcurrentRoutes == null) this._rendererOptions.maxConcurrentRoutes = 0
+
+    if (this._rendererOptions.inject && !this._rendererOptions.injectProperty) {
+      this._rendererOptions.injectProperty = '__PRERENDER_INJECTED'
+    }
+  }
+
+  async initialize () {
+    console.log('PuppeteerRenderer initialize', Date.now());
+    try {
+      // Workaround for Linux SUID Sandbox issues.
+      if (process.platform === 'linux') {
+        if (!this._rendererOptions.args) this._rendererOptions.args = []
+
+        if (this._rendererOptions.args.indexOf('--no-sandbox') === -1) {
+          this._rendererOptions.args.push('--no-sandbox')
+          this._rendererOptions.args.push('--disable-setuid-sandbox')
+        }
+      }
+      // console.log('process.platform', process.platform);
+      // process.platform darwin
+
+      // console.log('this._rendererOptions', this._rendererOptions);
+      // 其实就是wbapck传过来的，但又合并了一些默认配置
+      // {
+      //   inject: { foo: 'bar' },
+      //   headless: true,
+      //   renderAfterDocumentEvent: 'render-event',
+      //   maxConcurrentRoutes: 0,
+      //   injectProperty: '__PRERENDER_INJECTED'
+      // }
+
+      this._puppeteer = await puppeteer.launch(this._rendererOptions)
+    } catch (e) {
+      console.error(e)
+      console.error('[Prerenderer - PuppeteerRenderer] Unable to start Puppeteer')
+      // Re-throw the error so it can be handled further up the chain. Good idea or not?
+      throw e
+    }
+
+    return this._puppeteer
+  }
+
+  async handleRequestInterception (page, baseURL) {
+    await page.setRequestInterception(true)
+
+    page.on('request', req => {
+      // Skip third party requests if needed.
+      if (this._rendererOptions.skipThirdPartyRequests) {
+        if (!req.url().startsWith(baseURL)) {
+          req.abort()
+          return
+        }
+      }
+
+      req.continue()
+    })
+  }
+
+  async renderRoutes (routes, Prerenderer) {
+    const rootOptions = Prerenderer.getOptions()
+    const options = this._rendererOptions
+
+    const limiter = promiseLimit(this._rendererOptions.maxConcurrentRoutes)
+
+    const pagePromises = Promise.all(
+      routes.map(
+        (route, index) => limiter(
+          async () => {
+            const page = await this._puppeteer.newPage()
+
+            if (options.consoleHandler) {
+              page.on('console', message => options.consoleHandler(route, message))
+            }
+
+            if (options.inject) {
+              await page.evaluateOnNewDocument(`(function () { window['${options.injectProperty}'] = ${JSON.stringify(options.inject)}; })();`)
+            }
+
+            const baseURL = `http://localhost:${rootOptions.server.port}`
+
+            // Allow setting viewport widths and such.
+            if (options.viewport) await page.setViewport(options.viewport)
+
+            await this.handleRequestInterception(page, baseURL)
+
+            // Hack just in-case the document event fires before our main listener is added.
+            if (options.renderAfterDocumentEvent) {
+              page.evaluateOnNewDocument(function (options) {
+                window['__PRERENDER_STATUS'] = {}
+                document.addEventListener(options.renderAfterDocumentEvent, () => {
+                  window['__PRERENDER_STATUS'].__DOCUMENT_EVENT_RESOLVED = true
+                })
+              }, this._rendererOptions)
+            }
+            
+            const navigationOptions = (options.navigationOptions) ? { waituntil: 'networkidle0', ...options.navigationOptions } : { waituntil: 'networkidle0' };
+            await page.goto(`${baseURL}${route}`, navigationOptions);
+
+            // Wait for some specific element exists
+            const { renderAfterElementExists } = this._rendererOptions
+            if (renderAfterElementExists && typeof renderAfterElementExists === 'string') {
+              await page.waitForSelector(renderAfterElementExists)
+            }
+            // Once this completes, it's safe to capture the page contents.
+            await page.evaluate(waitForRender, this._rendererOptions)
+
+            const result = {
+              originalRoute: route,
+              route: await page.evaluate('window.location.pathname'),
+              html: await page.content()
+            }
+
+            await page.close()
+            return result
+          }
+        )
+      )
+    )
+
+    return pagePromises
+  }
+
+  destroy () {
+    this._puppeteer.close()
+  }
+}
+
+module.exports = PuppeteerRenderer
+
 
 ```
