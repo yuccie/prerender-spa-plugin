@@ -2,6 +2,8 @@
 
 - prerender-spa-plugin只是一个上层应用，
 - 其封装的是 @prerenderer/prerenderer 和 @prerenderer/renderer-puppeteer
+- 而 @prerenderer/prerenderer 和 @prerenderer/renderer-puppeteer 这两个其实都在[这个仓库](https://github.com/JoshTheDerf/prerenderer)
+- @prerenderer/prerenderer其实就是获取的根目录的index.js，而 @prerenderer/renderer-puppeteer获取的是rendeners目录里的
 
 ## prerender-spa-plugin
 
