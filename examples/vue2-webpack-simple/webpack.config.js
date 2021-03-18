@@ -72,7 +72,7 @@ if (process.env.NODE_ENV === 'production') {
       staticDir: path.join(__dirname, 'dist'),
       // 指定需要预渲染的页面路由，为何关闭historyApiFallback也会渲染呢？
       // 这里的路由主要是express服务访问的地址，同时也是puppeteer渲染的路由
-      routes: [ '/', '/about', '/contact' ],
+      routes: [ '/about', '/contact' ],
 
       renderer: new Renderer({
         inject: {
@@ -96,5 +96,20 @@ if (process.env.NODE_ENV === 'production') {
       template: 'index.html',
       filename: 'index.html'
     }),
+    // new PrerenderSPAPlugin({
+    //   // 指定需要预渲染的文件路径
+    //   staticDir: path.join(__dirname, 'dist'),
+    //   // 指定需要预渲染的页面路由，为何关闭historyApiFallback也会渲染呢？
+    //   // 这里的路由主要是express服务访问的地址，同时也是puppeteer渲染的路由
+    //   routes: [ '/', '/about', '/contact?aaa' ],
+
+    //   renderer: new Renderer({
+    //     inject: {
+    //       foo: 'bar'
+    //     },
+    //     headless: true,
+    //     renderAfterDocumentEvent: 'render-event'
+    //   })
+    // })
   ])
 }

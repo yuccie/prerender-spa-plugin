@@ -1,5 +1,8 @@
 ## 总结
 
+- 在一个不依赖第三方资源的项目里，可以使用，因为打出来的包，如果可以使用本地静态文件服务器访问才可以，如果打出来的包，本地无法访问。。。则自定义的puppeterr的事件不会执行，因此预渲染不会生效
+- 预渲染的前提是，未使用预渲染时先将资源构建出来，然后加上预渲染将构建出来的资源输出到另外一个目录，相当于在之前构建的基础上，重写了输出资源。
+
 - prerender-spa-plugin只是一个上层应用，
 - 其封装的是 @prerenderer/prerenderer 和 @prerenderer/renderer-puppeteer
 - 而 @prerenderer/prerenderer 和 @prerenderer/renderer-puppeteer 这两个其实都在[这个仓库](https://github.com/JoshTheDerf/prerenderer)
