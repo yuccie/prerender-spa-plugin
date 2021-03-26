@@ -1,12 +1,114 @@
 ## 总结
 
-- 在一个不依赖第三方资源的项目里，可以使用，因为打出来的包，如果可以使用本地静态文件服务器访问才可以，如果打出来的包，本地无法访问。。。则自定义的puppeterr的事件不会执行，因此预渲染不会生效
-- 预渲染的前提是，未使用预渲染时先将资源构建出来，然后加上预渲染将构建出来的资源输出到另外一个目录，相当于在之前构建的基础上，重写了输出资源。
+- 在一个不依赖第三方资源的项目里，可以使用，因为打出来的包，如果可以使用本地静态文件服务器访问才可以，如果打出来的包，本地无法访问。。。则自定义的puppeterr的事件不会执行，因此预渲染不会生效，这个可以使用代理啊？
+- 预渲染的前提是，未使用预渲染时先将资源构建出来，然后加上预渲染将构建出来的资源输出到另外一个目录，相当于在之前构建的基础上，重写了输出资源。这个先构建一次成本也不高
 
 - prerender-spa-plugin只是一个上层应用，
 - 其封装的是 @prerenderer/prerenderer 和 @prerenderer/renderer-puppeteer
 - 而 @prerenderer/prerenderer 和 @prerenderer/renderer-puppeteer 这两个其实都在[这个仓库](https://github.com/JoshTheDerf/prerenderer)
-- @prerenderer/prerenderer其实就是获取的根目录的index.js，而 @prerenderer/renderer-puppeteer获取的是rendeners目录里的
+- @prerenderer/prerenderer其实就是获取的根目录的index.js，而 @prerenderer/renderer-puppeteer获取的是@rendeners目录里的
+
+- 可以配置一个server，看都可以配置什么？
+- 代理，看都可以配置什么？
+- 
+
+```js
+const path = require('path')
+const PrerenderSPAPlugin = require('prerender-spa-plugin')
+const Renderer = PrerenderSPAPlugin.PuppeteerRenderer
+
+module.exports = {
+  plugins: [
+    ...
+    new PrerenderSPAPlugin({
+      // Required - The path to the webpack-outputted app to prerender.
+      staticDir: path.join(__dirname, 'dist'),
+
+      // Optional - The path your rendered app should be output to.
+      // (Defaults to staticDir.)
+      outputDir: path.join(__dirname, 'prerendered'),
+
+      // Optional - The location of index.html
+      indexPath: path.join(__dirname, 'dist', 'index.html'),
+
+      // Required - Routes to render.
+      routes: [ '/', '/about', '/some/deep/nested/route' ],
+
+      // Optional - Allows you to customize the HTML and output path before
+      // writing the rendered contents to a file.
+      // renderedRoute can be modified and it or an equivelant should be returned.
+      // renderedRoute format:
+      // {
+      //   route: String, // Where the output file will end up (relative to outputDir)
+      //   originalRoute: String, // The route that was passed into the renderer, before redirects.
+      //   html: String, // The rendered HTML for this route.
+      //   outputPath: String // The path the rendered HTML will be written to.
+      // }
+      postProcess (renderedRoute) {
+        // Ignore any redirects.
+        renderedRoute.route = renderedRoute.originalRoute
+        // Basic whitespace removal. (Don't use this in production.)
+        renderedRoute.html = renderedRoute.html.split(/>[\s]+</gmi).join('><')
+        // Remove /index.html from the output path if the dir name ends with a .html file extension.
+        // For example: /dist/dir/special.html/index.html -> /dist/dir/special.html
+        if (renderedRoute.route.endsWith('.html')) {
+          renderedRoute.outputPath = path.join(__dirname, 'dist', renderedRoute.route)
+        }
+
+        return renderedRoute
+      },
+
+      // Optional - Uses html-minifier (https://github.com/kangax/html-minifier)
+      // To minify the resulting HTML.
+      // Option reference: https://github.com/kangax/html-minifier#options-quick-reference
+      minify: {
+        collapseBooleanAttributes: true,
+        collapseWhitespace: true,
+        decodeEntities: true,
+        keepClosingSlash: true,
+        sortAttributes: true
+      },
+
+      // Server configuration options.
+      server: {
+        // Normally a free port is autodetected, but feel free to set this if needed.
+        port: 8001
+      },
+
+      // The actual renderer to use. (Feel free to write your own)
+      // Available renderers: https://github.com/Tribex/prerenderer/tree/master/renderers
+      renderer: new Renderer({
+        // Optional - The name of the property to add to the window object with the contents of `inject`.
+        injectProperty: '__PRERENDER_INJECTED',
+        // Optional - Any values you'd like your app to have access to via `window.injectProperty`.
+        inject: {
+          foo: 'bar'
+        },
+
+        // Optional - defaults to 0, no limit.
+        // Routes are rendered asynchronously.
+        // Use this to limit the number of routes rendered in parallel.
+        maxConcurrentRoutes: 4,
+
+        // Optional - Wait to render until the specified event is dispatched on the document.
+        // eg, with `document.dispatchEvent(new Event('custom-render-trigger'))`
+        renderAfterDocumentEvent: 'custom-render-trigger',
+
+        // Optional - Wait to render until the specified element is detected using `document.querySelector`
+        renderAfterElementExists: 'my-app-element',
+
+        // Optional - Wait to render until a certain amount of time has passed.
+        // NOT RECOMMENDED
+        renderAfterTime: 5000, // Wait 5 seconds.
+
+        // Other puppeteer options.
+        // (See here: https://github.com/GoogleChrome/puppeteer/blob/master/docs/api.md#puppeteerlaunchoptions)
+        headless: false // Display the browser window when rendering. Useful for debugging.
+      })
+    })
+  ]
+}
+```
 
 ## 
 
@@ -234,7 +336,6 @@ function PrerenderSPAPlugin (...args) {
   //   server: {}
   // }
 }
-
 
 
 PrerenderSPAPlugin.prototype.apply = function (compiler) {
@@ -708,6 +809,8 @@ class PuppeteerRenderer {
             const baseURL = `http://localhost:${rootOptions.server.port}`
 
             // Allow setting viewport widths and such.
+            // page.setViewport will resize the page. A lot of websites don't expect phones to change size, so you should set the viewport before navigating to the page.
+            // https://pptr.dev/#?product=Puppeteer&version=v8.0.0&show=api-pagesetviewportviewport
             if (options.viewport) await page.setViewport(options.viewport)
 
             await this.handleRequestInterception(page, baseURL)
@@ -723,6 +826,7 @@ class PuppeteerRenderer {
             }
             
             const navigationOptions = (options.navigationOptions) ? { waituntil: 'networkidle0', ...options.navigationOptions } : { waituntil: 'networkidle0' };
+
             await page.goto(`${baseURL}${route}`, navigationOptions);
 
             // Wait for some specific element exists
